@@ -6,6 +6,7 @@ require "tilt/erubis"
 configure do
   enable :sessions
   set :session_secret, 'secret'
+  set :erb, :escape_html => true
 end
 
 before do
@@ -19,20 +20,6 @@ end
 # View list of lists
 get "/lists" do
   @lists = session[:lists]
-
-  unless @lists.empty?
-    true_list = []
-    false_list = []
-    @lists.each do |list|
-      if list[:todos].all? { |todo| todo[:completed] == true  }
-        true_list << list
-      else
-        false_list << list
-      end
-    end
-    @lists = true_list + false_list
-  end
-
   erb :lists, layout: :layout
 end
 
@@ -55,7 +42,12 @@ def error_for_todo_name(name)
   end
 end
 
-# Create a new list
+def next_todo_id(todos)
+  max = todos.map { |todo| todo[:id] }.max || 0
+  max + 1
+end
+
+# Add a new todo list
 post "/lists" do
   list_name = params[:list_name].strip
 
@@ -71,89 +63,91 @@ post "/lists" do
 end
 
 # View single list
-get "/lists/:id" do
-  id = params[:id].to_i
-  @list = session[:lists][id]
+get "/lists/:list_id" do
+  list_id = params[:list_id].to_i
+  @list = session[:lists][list_id]
   erb :list, layout: :layout
 end
 
-# Edit an existing todo list
-get "/lists/:id/edit" do
-  id = params[:id].to_i
-  @list = session[:lists][id]
+# Edit existing todo list
+get "/lists/:list_id/edit" do
+  list_id = params[:list_id].to_i
+  @list = session[:lists][list_id]
   erb :edit_list, layout: :layout
 end
 
-# Update an existing todo list
-post "/lists/:id" do
+# Update existing todo list
+post "/lists/:list_id" do
   list_name = params[:list_name].strip
-  id = params[:id].to_i
+  list_id = params[:list_id].to_i
   @list = session[:lists][id]
 
   error = error_for_list_name(list_name)
   if error
-    id = params[:id].to_i
-    @list = session[:lists][id]
     session[:error] = error
     erb :edit_list, layout: :layout
   else
     @list[:name] = list_name
     session[:success] = "The list has been updated."
-    redirect "/lists/#{id}"
+    redirect "/lists/#{list_id}"
   end
 end
 
-# Delete an existing todo list
-post "/lists/:id/destroy" do
-  id = params[:id].to_i
-  session[:lists].delete_at(id)
+# Delete existing todo list
+post "/lists/:list_id/destroy" do
+  list_id = params[:list_id].to_i
+  session[:lists].delete_at(list_id)
   session[:success] = "The list has been deleted."
   redirect "/lists"
 end
 
-# Create a new todo
+# Add a new todo to a list
 post "/lists/:list_id/todos" do
   list_id = params[:list_id].to_i
   list = session[:lists][list_id]
-  todo_name = params[:todo].strip
+  text = params[:todo].strip
 
-  error = error_for_todo_name(todo_name)
+  error = error_for_todo_name(text)
   if error
     session[:error] = error
   else
-    list[:todos] << { name: params[:todo], completed: false }
+    id = next_todo_id(list[:todos])
+    list[:todos] << { id: id, name: text, completed: false }
     session[:success] = "The todo was added."
   end
   redirect "/lists/#{list_id}"
 end
 
-# Delete an existing todo list
+# Delete existing todo
 post "/lists/:list_id/todos/:todo_id/destroy" do
   list_id = params[:list_id].to_i
   todo_id = params[:todo_id].to_i
   list = session[:lists][list_id]
-
-  list[:todos].delete_at(todo_id)
+  todo_index = list[:todos].find_index { |todo| todo[:id] == todo_id }
+  
+  list[:todos].delete_at(todo_index)
   session[:success] = "The todo has been deleted."
   redirect "/lists/#{list_id}"
 end
 
+# Toggle todo completed
 post "/lists/:list_id/todos/:todo_id/check" do
   list_id = params[:list_id].to_i
   todo_id = params[:todo_id].to_i
   list = session[:lists][list_id]
-  list[:todos][todo_id][:completed] = !list[:todos][todo_id][:completed]
+  todo = list[:todos].select { |todo| todo[:id] == todo_id }.first
+  todo[:completed] = !todo[:completed]
+
   session[:success] = "Todo Updated."
   redirect "/lists/#{list_id}"
 end
 
+# Complete all todos
 post "/lists/:list_id/complete" do
   list_id = params[:list_id].to_i
   list = session[:lists][list_id]
 
-  list[:todos].each_with_index do | todo, index |
-    todo[:completed] = true
-  end
+  list[:todos].each { |todo| todo[:completed] = true }
 
   session[:success] = "Todos Complete!"
   redirect "/lists/#{list_id}"
